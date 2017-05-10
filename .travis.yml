@@ -1,5 +1,6 @@
 language: android
 
+dist: trusty
 sudo: enabled
 
 branches:
@@ -12,18 +13,20 @@ matrix:
           env: PLATFORM=linux CXX=g++-4.9 CC=gcc-4.9
           addons:
             apt:
-              sources: [ 'ubuntu-toolchain-r-test', 'george-edison55-precise-backports' ]
-              packages: [ 'cmake', 'cmake-data', 'gcc-4.9', 'g++-4.9', 'xorg-dev', 'libglu1-mesa-dev', 'libosmesa-dev', 'llvm-toolchain-precise', 'llvm-toolchain-precise-3.9' ]
-              # 'clang-3.9', 'libc++-dev', 'llvm-3.9-dev', 'libclang-3.9-dev'
-        - os: linux
-          env: PLATFORM=android
-          addons:
-            apt:
               sources: [ 'ubuntu-toolchain-r-test' ]
-              packages: [ 'libstdc++6', 's3cmd' ]
-          android:
-            components: [ 'tools', 'build-tools-25.0.0', 'extra-android-m2repository', 'android-25' ]
-          jdk: oraclejdk8
+              # 'george-edison55-precise-backports'
+              # 'llvm-toolchain-precise', 'llvm-toolchain-precise-3.9'
+              packages: [ 'cmake', 'cmake-data', 'gcc-4.9', 'g++-4.9', 'xorg-dev', 'libglu1-mesa-dev', 'libosmesa-dev' ]
+              # 'clang-3.9', 'libc++-dev', 'llvm-3.9-dev', 'libclang-3.9-dev'
+        # - os: linux
+        #   env: PLATFORM=android
+        #   addons:
+        #     apt:
+        #       sources: [ 'ubuntu-toolchain-r-test' ]
+        #       packages: [ 'libstdc++6', 's3cmd' ]
+        #   android:
+        #     components: [ 'tools', 'build-tools-25.0.0', 'extra-android-m2repository', 'android-25' ]
+        #   jdk: oraclejdk8
 
 before_install:
     # - mkdir -p /home/travis/bin
@@ -34,6 +37,17 @@ before_install:
     # - llvm-config --includedir
     # - llvm-config --libdir
     # - clang --version
+    # - sudo add-apt-repository ppa:chris-lea/libsodium -y
+    # - sudo add-apt-repository ppa:chris-lea/zeromq -y
+    # - sudo apt-get update
+    # - sudo apt-get install libsodium-dev libzmq5-dev -y
+
+    - sudo add-apt-repository -y ppa:kevinkreiser/libsodium
+    - sudo add-apt-repository -y ppa:kevinkreiser/libpgm
+    - sudo add-apt-repository -y ppa:kevinkreiser/zeromq3
+    - sudo add-apt-repository -y ppa:kevinkreiser/czmq
+    - sudo apt-get update
+    - sudo apt-get install libzmq3-dev libczmq-dev
 
     - git submodule update --init
     - source ./scripts/travis/before_install.sh
