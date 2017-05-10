@@ -13,7 +13,8 @@ matrix:
           addons:
             apt:
               sources: [ 'ubuntu-toolchain-r-test', 'george-edison55-precise-backports' ]
-              packages: [ 'cmake', 'cmake-data', 'gcc-4.9', 'g++-4.9', 'xorg-dev', 'libglu1-mesa-dev' ]
+              packages: [ 'cmake', 'cmake-data', 'gcc-4.9', 'g++-4.9', 'xorg-dev', 'libglu1-mesa-dev', 'libosmesa-dev', 'llvm-toolchain-precise', 'llvm-toolchain-precise-3.9' ]
+              # 'clang-3.9', 'libc++-dev', 'llvm-3.9-dev', 'libclang-3.9-dev'
         - os: linux
           env: PLATFORM=android
           addons:
@@ -25,6 +26,15 @@ matrix:
           jdk: oraclejdk8
 
 before_install:
+    # - mkdir -p /home/travis/bin
+    # - sudo ln -s /usr/bin/clang-3.9 /home/travis/bin/clang
+    # - sudo ln -s /usr/bin/llvm-config-3.9 /home/travis/bin/llvm-config
+    # - sudo ldconfig
+    # - llvm-config --version
+    # - llvm-config --includedir
+    # - llvm-config --libdir
+    # - clang --version
+
     - git submodule update --init
     - source ./scripts/travis/before_install.sh
 
