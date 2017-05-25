@@ -976,161 +976,9 @@ void SceneLoader::loadSource(const std::shared_ptr<Platform>& platform, const st
         return;
     }
 
-    std::string type;
-    std::string url;
-    std::string mbtiles;
-    std::vector<std::string> subdomains;
-
-    int32_t minDisplayZoom = -1;
-    int32_t maxDisplayZoom = -1;
-    int32_t maxZoom = 18;
-    int32_t zoomBias = 0;
-
-    if (auto typeNode = source["type"]) {
-        type = typeNode.Scalar();
-    }
-    if (auto urlNode = source["url"]) {
-        url = urlNode.Scalar();
-    }
-    if (auto minDisplayZoomNode = source["min_display_zoom"]) {
-        minDisplayZoom = minDisplayZoomNode.as<int32_t>(minDisplayZoom);
-    }
-    if (auto maxDisplayZoomNode = source["max_display_zoom"]) {
-        maxDisplayZoom = maxDisplayZoomNode.as<int32_t>(maxDisplayZoom);
-    }
-    if (auto maxZoomNode = source["max_zoom"]) {
-        maxZoom = maxZoomNode.as<int32_t>(maxZoom);
-    }
-    if (auto tileSizeNode = source["tile_size"]) {
-        zoomBias = TileSource::zoomBiasFromTileSize(tileSizeNode.as<int32_t>());
-    }
-
-    // Parse and append any URL parameters.
-    if (auto urlParamsNode = source["url_params"]) {
-        std::stringstream urlStream;
-        // Transform our current URL from "base[?query][#hash]" into "base?params[query][#hash]".
-        auto hashStart = std::min(url.find_first_of("#"), url.size());
-        auto queryStart = std::min(url.find_first_of("?"), url.size());
-        auto baseEnd = std::min(hashStart, queryStart + 1);
-        urlStream << url.substr(0, baseEnd);
-        if (queryStart == url.size()) {
-            urlStream << "?";
-        }
-        if (urlParamsNode.IsMap()) {
-            for (const auto& entry : urlParamsNode) {
-                if (entry.first.IsScalar() && entry.second.IsScalar()) {
-                    urlStream << entry.first.Scalar() << "=" << entry.second.Scalar() << "&";
-                } else {
-                    LOGW("Invalid url_params entry in source '%s', entries should be strings.", name.c_str());
-                }
-            }
-        } else {
-            LOGW("Expected a map of values for url_params in source '%s'.", name.c_str());
-        }
-        urlStream << url.substr(baseEnd);
-        url = urlStream.str();
-    }
-
-    // Apply URL subdomain configuration.
-    if (Node subDomainNode = source["url_subdomains"]) {
-        if (subDomainNode.IsSequence()) {
-            for (const auto& domain : subDomainNode) {
-                if (domain.IsScalar()) {
-                    subdomains.push_back(domain.Scalar());
-                }
-            }
-        }
-    }
-
-    // Check whether the URL template and subdomains make sense together, and warn if not.
-    bool hasSubdomainPlaceholder = (url.find("{s}") != std::string::npos);
-    if (hasSubdomainPlaceholder && subdomains.empty()) {
-        LOGW("The URL for source '%s' includes the subdomain placeholder '{s}', but no subdomains were given.", name.c_str());
-    }
-    if (!hasSubdomainPlaceholder && !subdomains.empty()) {
-        LOGW("The URL for source '%s' has subdomains specified, but does not include the subdomain placeholder '{s}'.", name.c_str());
-    }
-
-    // distinguish tiled and non-tiled sources by url
-    bool tiled = url.size() > 0 &&
-        url.find("{x}") != std::string::npos &&
-        url.find("{y}") != std::string::npos &&
-        url.find("{z}") != std::string::npos;
-
-    bool isMBTilesFile = false;
-    {
-        const char* extStr = ".mbtiles";
-        const size_t extLength = strlen(extStr);
-        const size_t urlLength = url.length();
-        isMBTilesFile = urlLength > extLength && (url.compare(urlLength - extLength, extLength, extStr) == 0);
-    }
-
-    auto rawSources = std::make_unique<MemoryCacheDataSource>();
-    rawSources->setCacheSize(CACHE_SIZE);
-
-    if (isMBTilesFile) {
-        // If we have MBTiles, we know the source is tiled.
-        tiled = true;
-        // Create an MBTiles data source from the file at the url and add it to the source chain.
-        rawSources->setNext(std::make_unique<MBTilesDataSource>(platform, name, url, ""));
-    } else if (tiled) {
-        rawSources->setNext(std::make_unique<NetworkDataSource>(platform, url, std::move(subdomains)));
-    }
-
-    std::shared_ptr<TileSource> sourcePtr;
-
-    if (type == "GeoJSON" && !tiled) {
-        sourcePtr = std::make_shared<ClientGeoJsonSource>(platform, name, url, minDisplayZoom, maxDisplayZoom, maxZoom, zoomBias);
-    } else if (type == "Raster") {
-        TextureOptions options = {GL_RGBA, GL_RGBA, {GL_LINEAR, GL_LINEAR}, {GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE} };
-        bool generateMipmaps = false;
-        if (Node filtering = source["filtering"]) {
-            if (extractTexFiltering(filtering, options.filtering)) {
-                generateMipmaps = true;
-            }
-        }
-
-        sourcePtr = std::make_shared<RasterSource>(name, std::move(rawSources),
-                                                   minDisplayZoom, maxDisplayZoom, maxZoom, zoomBias,
-                                                   options, generateMipmaps);
-    } else {
-        sourcePtr = std::make_shared<TileSource>(name, std::move(rawSources),
-                                                 minDisplayZoom, maxDisplayZoom, maxZoom, zoomBias);
-
-        if (type == "GeoJSON") {
-            sourcePtr->setFormat(TileSource::Format::GeoJson);
-        } else if (type == "TopoJSON") {
-            sourcePtr->setFormat(TileSource::Format::TopoJson);
-        } else if (type == "MVT") {
-            sourcePtr->setFormat(TileSource::Format::Mvt);
-        } else {
-            LOGE("Source '%s' does not have a valid type. Valid types are 'GeoJSON', 'TopoJSON', and 'MVT'. " \
-                "This source will be ignored.", name.c_str());
-            return;
-        }
-    }
-
-    _scene->tileSources().push_back(sourcePtr);
-
-    if (auto rasters = source["rasters"]) {
-        loadSourceRasters(platform, sourcePtr, source["rasters"], sources, _scene);
-    }
-
-}
-
-void SceneLoader::loadSourceRasters(const std::shared_ptr<Platform>& platform, std::shared_ptr<TileSource> &source, Node rasterNode, const Node& sources,
-                                    const std::shared_ptr<Scene>& scene) {
-    if (rasterNode.IsSequence()) {
-        for (const auto& raster : rasterNode) {
-            std::string srcName = raster.Scalar();
-            try {
-                loadSource(platform, srcName, sources[srcName], sources, scene);
-            } catch (YAML::RepresentationException e) {
-                LOGNode("Parsing sources: '%s'", sources[srcName], e.what());
-                return;
-            }
-            source->addRasterSource(scene->getTileSource(srcName));
-        }
+    auto loader = findDataSourceLoader(source);
+    if (loader) {
+        loader->loadSource(platform, name, source, sources, _scene);
     }
 }
 
@@ -1815,6 +1663,190 @@ void SceneLoader::loadBackground(Node background, const std::shared_ptr<Scene>& 
             str = parseSequence(colorNode);
         }
         scene->background().abgr = StyleParam::parseColor(str);
+    }
+}
+
+std::shared_ptr<DataSourceLoader> SceneLoader::findDataSourceLoader(const Node& source) {
+    auto result = std::find_if(m_dataSourceLoaders.begin(), m_dataSourceLoaders.end(), [&source](const std::shared_ptr<DataSourceLoader>& loader) -> bool {
+        return loader->canHandle(source);
+    });
+    if (result != m_dataSourceLoaders.end()) {
+        return (*result);
+    } else {
+        return m_defaultDataSourceLoader;
+    }
+}
+
+void SceneLoader::registerDataSourceLoader(const std::shared_ptr<DataSourceLoader>& loader) {
+    m_dataSourceLoaders.push_back(loader);
+}
+
+bool DefaultDataSourceLoader::canHandle(const Node& source) const {
+    return true;
+}
+
+std::vector<std::shared_ptr<DataSourceLoader>> SceneLoader::m_dataSourceLoaders;
+
+std::shared_ptr<DefaultDataSourceLoader> SceneLoader::m_defaultDataSourceLoader = std::make_shared<DefaultDataSourceLoader>();
+
+
+void DefaultDataSourceLoader::loadSource(const std::shared_ptr<Platform>& platform, const std::string& name,
+                                                         const Node& source, const Node& sources, const std::shared_ptr<Scene>& _scene) {
+    std::string type;
+    std::string url;
+    std::string mbtiles;
+    std::vector<std::string> subdomains;
+
+    int32_t minDisplayZoom = -1;
+    int32_t maxDisplayZoom = -1;
+    int32_t maxZoom = 18;
+    int32_t zoomBias = 0;
+
+    if (auto typeNode = source["type"]) {
+        type = typeNode.Scalar();
+    }
+    if (auto urlNode = source["url"]) {
+        url = urlNode.Scalar();
+    }
+    if (auto minDisplayZoomNode = source["min_display_zoom"]) {
+        minDisplayZoom = minDisplayZoomNode.as<int32_t>(minDisplayZoom);
+    }
+    if (auto maxDisplayZoomNode = source["max_display_zoom"]) {
+        maxDisplayZoom = maxDisplayZoomNode.as<int32_t>(maxDisplayZoom);
+    }
+    if (auto maxZoomNode = source["max_zoom"]) {
+        maxZoom = maxZoomNode.as<int32_t>(maxZoom);
+    }
+    if (auto tileSizeNode = source["tile_size"]) {
+        zoomBias = TileSource::zoomBiasFromTileSize(tileSizeNode.as<int32_t>());
+    }
+
+    // Parse and append any URL parameters.
+    if (auto urlParamsNode = source["url_params"]) {
+        std::stringstream urlStream;
+        // Transform our current URL from "base[?query][#hash]" into "base?params[query][#hash]".
+        auto hashStart = std::min(url.find_first_of("#"), url.size());
+        auto queryStart = std::min(url.find_first_of("?"), url.size());
+        auto baseEnd = std::min(hashStart, queryStart + 1);
+        urlStream << url.substr(0, baseEnd);
+        if (queryStart == url.size()) {
+            urlStream << "?";
+        }
+        if (urlParamsNode.IsMap()) {
+            for (const auto& entry : urlParamsNode) {
+                if (entry.first.IsScalar() && entry.second.IsScalar()) {
+                    urlStream << entry.first.Scalar() << "=" << entry.second.Scalar() << "&";
+                } else {
+                    LOGW("Invalid url_params entry in source '%s', entries should be strings.", name.c_str());
+                }
+            }
+        } else {
+            LOGW("Expected a map of values for url_params in source '%s'.", name.c_str());
+        }
+        urlStream << url.substr(baseEnd);
+        url = urlStream.str();
+    }
+
+    // Apply URL subdomain configuration.
+    if (Node subDomainNode = source["url_subdomains"]) {
+        if (subDomainNode.IsSequence()) {
+            for (const auto& domain : subDomainNode) {
+                if (domain.IsScalar()) {
+                    subdomains.push_back(domain.Scalar());
+                }
+            }
+        }
+    }
+
+    // Check whether the URL template and subdomains make sense together, and warn if not.
+    bool hasSubdomainPlaceholder = (url.find("{s}") != std::string::npos);
+    if (hasSubdomainPlaceholder && subdomains.empty()) {
+        LOGW("The URL for source '%s' includes the subdomain placeholder '{s}', but no subdomains were given.", name.c_str());
+    }
+    if (!hasSubdomainPlaceholder && !subdomains.empty()) {
+        LOGW("The URL for source '%s' has subdomains specified, but does not include the subdomain placeholder '{s}'.", name.c_str());
+    }
+
+    // distinguish tiled and non-tiled sources by url
+    bool tiled = url.size() > 0 &&
+                 url.find("{x}") != std::string::npos &&
+                 url.find("{y}") != std::string::npos &&
+                 url.find("{z}") != std::string::npos;
+
+    bool isMBTilesFile = false;
+    {
+        const char* extStr = ".mbtiles";
+        const size_t extLength = strlen(extStr);
+        const size_t urlLength = url.length();
+        isMBTilesFile = urlLength > extLength && (url.compare(urlLength - extLength, extLength, extStr) == 0);
+    }
+
+    auto rawSources = std::make_unique<MemoryCacheDataSource>();
+    rawSources->setCacheSize(CACHE_SIZE);
+
+    if (isMBTilesFile) {
+        // If we have MBTiles, we know the source is tiled.
+        tiled = true;
+        // Create an MBTiles data source from the file at the url and add it to the source chain.
+        rawSources->setNext(std::make_unique<MBTilesDataSource>(platform, name, url, ""));
+    } else if (tiled) {
+        rawSources->setNext(std::make_unique<NetworkDataSource>(platform, url, std::move(subdomains)));
+    }
+
+    std::shared_ptr<TileSource> sourcePtr;
+
+    if (type == "GeoJSON" && !tiled) {
+        sourcePtr = std::make_shared<ClientGeoJsonSource>(platform, name, url, minDisplayZoom, maxDisplayZoom, maxZoom, zoomBias);
+    } else if (type == "Raster") {
+        TextureOptions options = {GL_RGBA, GL_RGBA, {GL_LINEAR, GL_LINEAR}, {GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE} };
+        bool generateMipmaps = false;
+        if (Node filtering = source["filtering"]) {
+            if (SceneLoader::extractTexFiltering(filtering, options.filtering)) {
+                generateMipmaps = true;
+            }
+        }
+
+        sourcePtr = std::make_shared<RasterSource>(name, std::move(rawSources),
+                                                   minDisplayZoom, maxDisplayZoom, maxZoom, zoomBias,
+                                                   options, generateMipmaps);
+    } else {
+        sourcePtr = std::make_shared<TileSource>(name, std::move(rawSources),
+                                                 minDisplayZoom, maxDisplayZoom, maxZoom, zoomBias);
+
+        if (type == "GeoJSON") {
+            sourcePtr->setFormat(TileSource::Format::GeoJson);
+        } else if (type == "TopoJSON") {
+            sourcePtr->setFormat(TileSource::Format::TopoJson);
+        } else if (type == "MVT") {
+            sourcePtr->setFormat(TileSource::Format::Mvt);
+        } else {
+            LOGE("Source '%s' does not have a valid type. Valid types are 'GeoJSON', 'TopoJSON', and 'MVT'. " \
+            "This source will be ignored.", name.c_str());
+            return;
+        }
+    }
+
+    _scene->tileSources().push_back(sourcePtr);
+
+    if (auto rasters = source["rasters"]) {
+        loadSourceRasters(platform, sourcePtr, source["rasters"], sources, _scene);
+    }
+
+}
+
+void DefaultDataSourceLoader::loadSourceRasters(const std::shared_ptr<Platform>& platform, std::shared_ptr<TileSource> &source, Node rasterNode, const Node& sources,
+                                    const std::shared_ptr<Scene>& scene) {
+    if (rasterNode.IsSequence()) {
+        for (const auto& raster : rasterNode) {
+            std::string srcName = raster.Scalar();
+            try {
+                loadSource(platform, srcName, sources[srcName], sources, scene);
+            } catch (YAML::RepresentationException e) {
+                LOGNode("Parsing sources: '%s'", sources[srcName], e.what());
+                return;
+            }
+            source->addRasterSource(scene->getTileSource(srcName));
+        }
     }
 }
 

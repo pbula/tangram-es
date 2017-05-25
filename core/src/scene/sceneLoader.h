@@ -39,6 +39,21 @@ struct StyleUniform {
     UniformValue value;
 };
 
+class DataSourceLoader {
+public:
+    virtual bool canHandle(const Node& source) const = 0;
+    virtual void loadSource(const std::shared_ptr<Platform>& platform, const std::string& name,
+              const Node& source, const Node& sources, const std::shared_ptr<Scene>& _scene) = 0;
+};
+
+class DefaultDataSourceLoader : public DataSourceLoader {
+    bool canHandle(const Node& source) const override;
+    void loadSource(const std::shared_ptr<Platform>& platform, const std::string& name,
+              const Node& source, const Node& sources, const std::shared_ptr<Scene>& _scene) override;
+    void loadSourceRasters(const std::shared_ptr<Platform>& platform, std::shared_ptr<TileSource> &source, Node rasterNode, const Node& sources,
+                                        const std::shared_ptr<Scene>& scene);
+};
+
 struct SceneLoader {
     using Node = YAML::Node;
 
@@ -54,8 +69,6 @@ struct SceneLoader {
     static void loadBackground(Node background, const std::shared_ptr<Scene>& scene);
     static void loadSource(const std::shared_ptr<Platform>& platform, const std::string& name,
                            const Node& source, const Node& sources, const std::shared_ptr<Scene>& scene);
-    static void loadSourceRasters(const std::shared_ptr<Platform>& platform, std::shared_ptr<TileSource>& source, Node rasterNode,
-                                  const Node& sources, const std::shared_ptr<Scene>& scene);
     static void loadTexture(const std::shared_ptr<Platform>& platform, const std::pair<Node, Node>& texture, const std::shared_ptr<Scene>& scene);
     static void loadLayer(const std::pair<Node, Node>& layer, const std::shared_ptr<Scene>& scene);
     static void loadLight(const std::pair<Node, Node>& light, const std::shared_ptr<Scene>& scene);
@@ -101,8 +114,15 @@ struct SceneLoader {
     static bool loadStyle(const std::shared_ptr<Platform>& platform, const std::string& styleName,
                           Node config, const std::shared_ptr<Scene>& scene);
 
+    static std::shared_ptr<DataSourceLoader> findDataSourceLoader(const Node& source);
+    static void registerDataSourceLoader(const std::shared_ptr<DataSourceLoader>& loader);
+
     static std::mutex m_textureMutex;
     SceneLoader() = delete;
+
+private:
+    static std::vector<std::shared_ptr<DataSourceLoader>> m_dataSourceLoaders;
+    static std::shared_ptr<DefaultDataSourceLoader> m_defaultDataSourceLoader;
 
 };
 
